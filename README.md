@@ -108,7 +108,7 @@ web/index.html          Interfaz web
 - `Parecido permitido`: controla que tan flexibles son los grupos visuales de imagenes. `0` exige imagenes casi identicas, `6` es el valor recomendado y valores mas altos encuentran fotos menos parecidas, con mas riesgo de falsos positivos. No aplica a videos o documentos.
 - `Max. archivos`: cantidad maxima de archivos a analizar. `0` analiza toda la carpeta.
 - `Imagenes`, `Videos`, `Documentos`: limitan el tipo de archivo analizado para acelerar el escaneo.
-- `Encontrar memes`: usa nombres comunes y una heuristica visual de texto dentro de la imagen.
+- `Encontrar memes`: usa nombres comunes, OCR si `pytesseract` esta disponible, y una heuristica estricta para franjas de texto superior/inferior.
 - `Encontrar miniaturas/baja calidad`: detecta resoluciones pequenas y nombres tipicos de miniaturas/cache.
 
 ## Tipos soportados

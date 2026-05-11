@@ -57,7 +57,7 @@ Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo
 - Cada grupo duplicado tiene `Seleccionar todas` para descartar todo el grupo, incluso la imagen marcada como mejor calidad.
 - Cada grupo duplicado tiene `Deseleccionar grupo` para no mover nada de ese grupo.
 - En revisiones de memes/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.
-- La deteccion de memes es heuristica: combina nombres comunes y senales visuales de texto superpuesto dentro de la imagen.
+- La deteccion de memes debe ser conservadora: nombres comunes, OCR opcional con `pytesseract`, y heuristica estricta de franjas de texto. Evitar marcar fotos normales solo por bordes/contraste.
 - La deteccion de miniaturas/baja calidad usa dimensiones pequenas y nombres tipo `thumb`, `thumbnail`, `miniatura`, `preview` o `cache`.
 
 ## Notas de desarrollo

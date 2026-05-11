@@ -231,48 +231,67 @@ def low_quality_reason(info: ImageInfo) -> str | None:
 def text_overlay_score(image: Any, y_start: int, y_end: int) -> float:
     width, height = image.size
     pixels = image.load()
-    total = 0
-    strong_edges = 0
-    very_dark = 0
-    very_light = 0
-    row_hits: set[int] = set()
-    step_x = max(1, width // 220)
-    step_y = max(1, (y_end - y_start) // 44)
+    sampled_rows = 0
+    text_like_rows = 0
+    step_x = max(1, width // 180)
+    step_y = max(1, (y_end - y_start) // 48)
 
     for y in range(y_start, max(y_start + 1, y_end - 1), step_y):
-        row_edges = 0
+        sampled_rows += 1
+        transitions = 0
+        dark_pixels = 0
+        light_pixels = 0
         row_total = 0
         for x in range(1, max(2, width - 1), step_x):
             value = int(pixels[x, y])
             left = int(pixels[x - 1, y])
-            right = int(pixels[min(width - 1, x + 1), y])
-            up = int(pixels[x, max(0, y - 1)])
-            down = int(pixels[x, min(height - 1, y + 1)])
-            total += 1
             row_total += 1
-            if (
-                abs(value - left) > 48
-                or abs(value - right) > 48
-                or abs(value - up) > 48
-                or abs(value - down) > 48
-            ):
-                strong_edges += 1
-                row_edges += 1
-            if value < 38:
-                very_dark += 1
-            elif value > 218:
-                very_light += 1
-        if row_total and row_edges / row_total > 0.16:
-            row_hits.add(y)
+            if abs(value - left) > 96:
+                transitions += 1
+            if value < 48:
+                dark_pixels += 1
+            elif value > 208:
+                light_pixels += 1
 
-    if not total:
+        if not row_total:
+            continue
+
+        transition_ratio = transitions / row_total
+        dark_ratio = dark_pixels / row_total
+        light_ratio = light_pixels / row_total
+
+        # Texto superpuesto suele alternar pixeles claros/oscuros en varias filas.
+        # Fotos normales tambien tienen bordes, pero rara vez sostienen este patron.
+        if 0.08 <= transition_ratio <= 0.34 and dark_ratio >= 0.04 and light_ratio >= 0.04:
+            text_like_rows += 1
+
+    if not sampled_rows:
         return 0.0
 
-    edge_ratio = strong_edges / total
-    dark_ratio = very_dark / total
-    light_ratio = very_light / total
-    row_ratio = len(row_hits) / max(1, (y_end - y_start) // step_y)
-    return edge_ratio + min(dark_ratio, light_ratio) * 1.2 + row_ratio * 0.55
+    return text_like_rows / sampled_rows
+
+
+def ocr_text_reason(path: Path) -> str | None:
+    try:
+        import pytesseract  # type: ignore
+    except Exception:
+        return None
+
+    if Image is None or ImageOps is None:
+        return None
+
+    try:
+        with Image.open(path) as image:
+            image = ImageOps.exif_transpose(image)
+            image.thumbnail((1200, 1200))
+            text = pytesseract.image_to_string(image, config="--psm 6")
+    except Exception:
+        return None
+
+    normalized = "".join(char for char in text if char.isalnum())
+    if len(normalized) >= 10:
+        return "posible meme por texto OCR"
+    return None
 
 
 def meme_reason(info: ImageInfo) -> str | None:
@@ -298,24 +317,28 @@ def meme_reason(info: ImageInfo) -> str | None:
     if any(token in name for token in meme_tokens):
         return "posible meme por nombre"
 
+    ocr_reason = ocr_text_reason(info.path)
+    if ocr_reason:
+        return ocr_reason
+
     if Image is None or ImageOps is None or not info.width or not info.height:
         return None
 
     try:
         with Image.open(info.path) as image:
             image = ImageOps.exif_transpose(image).convert("L")
-            image.thumbnail((256, 256))
+            image.thumbnail((384, 384))
             width, height = image.size
-            if width < 80 or height < 80:
+            if width < 140 or height < 140:
                 return None
-            band_height = max(18, height // 4)
-            band_scores = []
-            for band_index in range(5):
-                y_start = int((height - band_height) * (band_index / 4))
-                band_scores.append(text_overlay_score(image, y_start, min(height, y_start + band_height)))
-            ratio = width / max(height, 1)
-            if 0.35 <= ratio <= 3.2 and max(band_scores) > 0.09:
-                return "posible meme por texto dentro de la imagen"
+            band_height = max(28, height // 5)
+            bands = (
+                (0, band_height),
+                (height - band_height, height),
+            )
+            scores = [text_overlay_score(image, start, end) for start, end in bands]
+            if max(scores) >= 0.42:
+                return "posible meme por franja de texto"
     except Exception:
         return None
 
