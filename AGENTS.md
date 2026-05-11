@@ -46,8 +46,9 @@ pip install pillow
 - Los archivos nunca se borran directamente.
 - Los descartes se mueven a `_DUPLICADOS_ELIMINADOS` dentro de la carpeta analizada.
 - Para duplicados, la sugerencia inicial conserva la imagen de mayor calidad/resolucion; si empata, conserva la mas antigua.
-- Cada tarjeta tiene una casilla `Mover`. Lo que este marcado se mueve, incluso si todas las imagenes de un grupo estan marcadas.
-- La opcion `Mantener` solo ayuda a elegir rapidamente una imagen para no mover; el usuario puede volver a marcarla para moverla tambien.
+- En duplicados, la opcion `Mantener` define que imagen queda fuera de los descartes.
+- Cada grupo duplicado tiene `Seleccionar todas` para descartar todo el grupo, incluso la imagen marcada como mejor calidad.
+- En revisiones de memes/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.
 - La deteccion de memes es heuristica: combina nombres comunes y senales visuales de texto superpuesto dentro de la imagen.
 - La deteccion de miniaturas/baja calidad usa dimensiones pequenas y nombres tipo `thumb`, `thumbnail`, `miniatura`, `preview` o `cache`.
 

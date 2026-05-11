@@ -6,11 +6,13 @@ App local para revisar fotos duplicadas o visualmente parecidas, encontrar posib
 
 - Duplicados exactos por SHA-256.
 - Imagenes visualmente similares con hash perceptual.
+- La similitud visual combina `dHash` para bordes y `aHash` para composicion general, de modo que puede unir la misma foto aunque cambie tamano o compresion.
 - Prioridad automatica para conservar la imagen de mayor calidad/resolucion y luego la mas antigua.
 - Tema oscuro.
 - Vista en 2 columnas, o 3 columnas en pantallas anchas.
 - Barra fija para mover todos los descartes seleccionados mientras haces scroll.
-- Casilla `Mover` en cada tarjeta, para seleccionar una, varias o todas las imagenes de un grupo.
+- Boton `Seleccionar todas` por grupo, para descartar incluso todas las imagenes duplicadas.
+- En revisiones de memes/miniaturas, casilla `Mover` en cada tarjeta para decidir candidato por candidato.
 - Revision opcional de memes por texto dentro de la imagen.
 - Revision opcional de miniaturas o imagenes de baja calidad.
 - Los descartes se mueven a `_DUPLICADOS_ELIMINADOS`; no se eliminan permanentemente.
@@ -81,14 +83,14 @@ web/index.html          Interfaz web
 2. Deja activado `Detectar similares visuales` si quieres encontrar imagenes parecidas, no solo duplicados exactos.
 3. Activa `Encontrar memes` para revisar imagenes con posible texto superpuesto.
 4. Activa `Encontrar miniaturas/baja calidad` para revisar archivos pequenos o thumbnails.
-5. Haz clic dentro de cualquier tarjeta para marcar o desmarcar `Mover`.
-6. Usa `Mantener` si quieres elegir rapidamente una imagen del grupo para conservar.
+5. En duplicados, usa `Mantener` para elegir la imagen que quieres salvar.
+6. Si no quieres ninguna imagen de un grupo duplicado, usa `Seleccionar todas`.
 7. Usa `Mover descartados` en un grupo o `Mover descartados seleccionados` en la barra fija.
 
 ## Opciones
 
-- `Umbral visual`: valores mas altos encuentran mas imagenes similares, con mas riesgo de falsos positivos.
-- `Limite`: `0` analiza todo; otro numero limita la cantidad de imagenes revisadas.
+- `Parecido permitido`: controla que tan flexibles son los grupos visuales. `0` exige imagenes casi identicas, `6` es el valor recomendado y valores mas altos encuentran fotos menos parecidas, con mas riesgo de falsos positivos.
+- `Max. imagenes`: cantidad maxima de imagenes a analizar. `0` analiza toda la carpeta.
 - `Encontrar memes`: usa nombres comunes y una heuristica visual de texto dentro de la imagen.
 - `Encontrar miniaturas/baja calidad`: detecta resoluciones pequenas y nombres tipicos de miniaturas/cache.
 

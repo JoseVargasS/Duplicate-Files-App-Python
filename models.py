@@ -16,6 +16,7 @@ class ImageInfo:
     height: int = 0
     sha256: str | None = None
     visual_hash: int | None = None
+    average_hash: int | None = None
     visual_error: str | None = None
 
 

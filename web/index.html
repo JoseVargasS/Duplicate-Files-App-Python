@@ -178,6 +178,19 @@
       overflow: hidden;
       box-shadow: var(--shadow);
     }
+    .group.all-selected {
+      border-color: var(--danger-strong);
+      box-shadow: 0 0 0 2px rgba(226, 74, 64, 0.26), var(--shadow);
+    }
+    .group.all-selected .group-head {
+      background: rgba(199, 52, 43, 0.18);
+    }
+    .group.all-selected .group-title::after {
+      content: " - todas seleccionadas";
+      color: var(--danger-strong);
+      font-size: 12px;
+      font-weight: 700;
+    }
     .group-head {
       display: flex;
       align-items: center;
@@ -196,6 +209,13 @@
       font-size: 13px;
       margin-left: 8px;
       font-weight: 500;
+    }
+    .group-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
     .images {
       display: grid;
@@ -216,6 +236,13 @@
     .image-card.selected {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px rgba(23, 107, 93, 0.18);
+    }
+    .group.all-selected .image-card {
+      border-color: var(--danger-strong);
+      box-shadow: 0 0 0 2px rgba(226, 74, 64, 0.28);
+    }
+    .group.all-selected .image-card.keep {
+      border-color: var(--danger-strong);
     }
     .thumb {
       width: 100%;
@@ -249,13 +276,22 @@
       margin-top: 8px;
     }
     .pill {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
       padding: 3px 7px;
       border-radius: 999px;
       background: var(--soft);
       color: var(--accent-strong);
       font-size: 11px;
       font-weight: 700;
+      line-height: 1.15;
+      min-width: 72px;
+    }
+    .group.all-selected .pill {
+      background: rgba(199, 52, 43, 0.22);
+      color: #ffb7b2;
     }
     .empty {
       text-align: center;
@@ -278,6 +314,8 @@
       .actions { align-items: stretch; flex-direction: column; }
       #results { grid-template-columns: 1fr; }
       .group-head { align-items: flex-start; flex-direction: column; }
+      .group-actions { width: 100%; justify-content: stretch; }
+      .group-actions button { flex: 1; }
       .images { grid-template-columns: 1fr; }
     }
   </style>
@@ -298,9 +336,9 @@
         <label><input id="visual" type="checkbox" checked> Detectar similares visuales</label>
         <label><input id="memes" type="checkbox"> Encontrar memes</label>
         <label><input id="lowQuality" type="checkbox" checked> Encontrar miniaturas/baja calidad</label>
-        <label>Umbral visual <input id="threshold" type="number" min="0" max="20" value="6"></label>
-        <label>Limite <input id="limit" type="number" min="0" value="0"></label>
-        <span>0 analiza todo. Umbral mayor encuentra mas parecidas, pero puede incluir falsos positivos.</span>
+        <label>Parecido permitido <input id="threshold" type="number" min="0" max="20" value="6"></label>
+        <label>Max. imagenes <input id="limit" type="number" min="0" value="0"></label>
+        <span>Parecido permitido: 0 solo casi iguales; 6 recomendado; mas alto agrupa fotos menos parecidas. Max. imagenes: 0 analiza todo.</span>
       </div>
     </section>
 
@@ -427,6 +465,33 @@
         .replaceAll("'", "&#039;");
     }
 
+    function humanSize(bytes) {
+      let value = Number(bytes || 0);
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      for (const unit of units) {
+        if (value < 1024 || unit === "TB") {
+          return unit === "B" ? `${Math.round(value)} B` : `${value.toFixed(1)} ${unit}`;
+        }
+        value /= 1024;
+      }
+      return `${bytes || 0} B`;
+    }
+
+    function fileById(id) {
+      for (const group of currentGroups) {
+        const file = group.files.find(item => item.id === id);
+        if (file) return file;
+      }
+      return null;
+    }
+
+    function selectedSize(removeIds) {
+      return removeIds.reduce((total, id) => {
+        const file = fileById(id);
+        return total + Number(file ? file.size : 0);
+      }, 0);
+    }
+
     function renderGroups(groups) {
       if (!groups.length) {
         resultsEl.innerHTML = '<div class="empty">No se encontraron duplicados, memes o miniaturas con la configuracion actual.</div>';
@@ -448,8 +513,9 @@
                 <div>${escapeHtml(file.size_text)} - ${escapeHtml(file.dimensions_text)} - ${escapeHtml(file.mtime_text)}</div>
                 <div class="path">${escapeHtml(file.relative)}</div>
                 <div class="choice">
-                  <label><input class="discard-check" type="checkbox" value="${file.id}" ${moveChecked ? "checked" : ""}> Mover</label>
-                  ${isReview ? "" : `<label><input type="radio" name="keep-${group.group_id}" value="${file.id}" ${isKeep ? "checked" : ""}> Mantener</label>`}
+                  ${isReview
+                    ? `<label><input class="discard-check" type="checkbox" value="${file.id}" checked> Mover</label>`
+                    : `<label><input type="radio" name="keep-${group.group_id}" value="${file.id}" ${isKeep ? "checked" : ""}> Mantener</label>`}
                   ${isKeep ? '<span class="pill">mejor calidad</span>' : ""}
                 </div>
               </div>
@@ -458,15 +524,18 @@
         }).join("");
 
         return `
-          <section class="group" data-group-id="${group.group_id}" data-kind="${escapeHtml(group.kind || "duplicate")}">
+          <section class="group" data-group-id="${group.group_id}" data-kind="${escapeHtml(group.kind || "duplicate")}" data-discard-all="false">
             <div class="group-head">
               <div>
                 <span class="group-title">${group.kind === "review" ? "Revision" : "Grupo"} #${group.group_id}</span>
                 <span class="group-reason">${escapeHtml(group.reason)}</span>
               </div>
-              <button class="danger" type="button" data-action="move-selected-group" data-group-id="${group.group_id}">
-                Mover descartados
-              </button>
+              <div class="group-actions">
+                ${group.kind === "review" ? "" : `<button class="secondary" type="button" data-action="select-all-group" data-group-id="${group.group_id}">Seleccionar todas</button>`}
+                <button class="danger" type="button" data-action="move-selected-group" data-group-id="${group.group_id}">
+                  Mover descartados
+                </button>
+              </div>
             </div>
             <div class="images">${filesHtml}</div>
           </section>
@@ -477,14 +546,16 @@
     resultsEl.addEventListener("change", event => {
       if (!event.target.matches('input[type="radio"]')) return;
       const groupEl = event.target.closest(".group");
-      groupEl.querySelectorAll(".image-card").forEach(card => card.classList.remove("keep"));
+      groupEl.dataset.discardAll = "false";
+      groupEl.classList.remove("all-selected");
+      const selectAllBtn = groupEl.querySelector('button[data-action="select-all-group"]');
+      if (selectAllBtn) selectAllBtn.textContent = "Seleccionar todas";
+      groupEl.querySelectorAll(".image-card").forEach(card => card.classList.remove("keep", "selected"));
       const card = event.target.closest(".image-card");
       card.classList.add("keep");
-      const discardCheck = card.querySelector(".discard-check");
-      if (discardCheck) {
-        discardCheck.checked = false;
-        card.classList.remove("selected");
-      }
+      groupEl.querySelectorAll(".image-card").forEach(item => {
+        if (item !== card) item.classList.add("selected");
+      });
       updateSelectionCount();
     });
 
@@ -501,22 +572,48 @@
       const groupEl = card.closest(".group");
       if (!groupEl) return;
 
-      const checkbox = card.querySelector(".discard-check");
-      if (!checkbox) return;
-      checkbox.checked = !checkbox.checked;
-      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+      if (groupEl.dataset.kind === "review") {
+        const checkbox = card.querySelector(".discard-check");
+        if (!checkbox) return;
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
+
+      const radio = card.querySelector('input[type="radio"]');
+      if (!radio || radio.checked) return;
+      radio.checked = true;
+      radio.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
     function getSelectedDiscardIds(scope = document) {
       const ids = [];
+      const duplicateGroups = scope.matches && scope.matches('.group[data-kind="duplicate"]')
+        ? [scope]
+        : Array.from(scope.querySelectorAll('.group[data-kind="duplicate"]'));
+      duplicateGroups.forEach(groupEl => {
+        const groupId = Number(groupEl.dataset.groupId);
+        const group = currentGroups.find(item => item.group_id === groupId);
+        if (!group) return;
+        if (groupEl.dataset.discardAll === "true") {
+          group.files.forEach(file => ids.push(file.id));
+          return;
+        }
+        const checked = groupEl.querySelector('input[type="radio"]:checked');
+        if (!checked) return;
+        group.files.forEach(file => {
+          if (file.id !== checked.value) ids.push(file.id);
+        });
+      });
       scope.querySelectorAll('.discard-check:checked').forEach(input => ids.push(input.value));
       return [...new Set(ids)];
     }
 
     function updateSelectionCount() {
       const selected = getSelectedDiscardIds();
+      const bytes = selectedSize(selected);
       bulkActionsEl.hidden = !currentGroups.length;
-      selectionCountEl.textContent = `${selected.length} archivo(s) seleccionados para mover`;
+      selectionCountEl.textContent = `${selected.length} archivo(s) seleccionados para mover - ${humanSize(bytes)} por liberar`;
       moveAllBtn.disabled = selected.length === 0;
     }
 
@@ -525,16 +622,17 @@
         setStatus("No hay archivos seleccionados para mover.", "warning");
         return;
       }
-      const ok = confirm(`${message}\n\nSe moveran ${removeIds.length} archivo(s) a _DUPLICADOS_ELIMINADOS. Continuar?`);
+      const bytes = selectedSize(removeIds);
+      const ok = confirm(`${message}\n\nSe moveran ${removeIds.length} archivo(s) (${humanSize(bytes)}) a _DUPLICADOS_ELIMINADOS. Continuar?`);
       if (!ok) return;
 
       try {
         if (sourceEl) sourceEl.disabled = true;
         const payload = await postJson("/api/move-selected", { remove_ids: removeIds });
         if (payload.errors && payload.errors.length) {
-          setStatus(`Movidos ${payload.moved.length}. Algunos archivos tuvieron error.`, "warning");
+          setStatus(`Movidos ${payload.moved.length} archivo(s), aprox. ${humanSize(bytes)} liberados. Algunos archivos tuvieron error.`, "warning");
         } else {
-          setStatus(`Listo: ${payload.moved.length} archivo(s) movidos a respaldo.`);
+          setStatus(`Listo: ${payload.moved.length} archivo(s) movidos a respaldo. Espacio liberado aprox.: ${humanSize(bytes)}.`);
         }
         removeIds.forEach(id => {
           const card = resultsEl.querySelector(`.image-card[data-file-id="${CSS.escape(id)}"]`);
@@ -557,6 +655,20 @@
       if (!button) return;
       const groupEl = button.closest(".group");
       await moveSelected(getSelectedDiscardIds(groupEl), button, "Se moveran los elementos marcados en este grupo.");
+    });
+
+    resultsEl.addEventListener("click", event => {
+      const button = event.target.closest('button[data-action="select-all-group"]');
+      if (!button) return;
+      const groupEl = button.closest(".group");
+      const shouldSelectAll = groupEl.dataset.discardAll !== "true";
+      groupEl.dataset.discardAll = shouldSelectAll ? "true" : "false";
+      groupEl.classList.toggle("all-selected", shouldSelectAll);
+      groupEl.querySelectorAll(".image-card").forEach(card => {
+        card.classList.toggle("selected", shouldSelectAll || !card.classList.contains("keep"));
+      });
+      button.textContent = shouldSelectAll ? "Usar mantener" : "Seleccionar todas";
+      updateSelectionCount();
     });
 
     moveAllBtn.addEventListener("click", async () => {

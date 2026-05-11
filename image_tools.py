@@ -58,8 +58,49 @@ def calculate_dhash(path: Path, hash_size: int = 8) -> tuple[int | None, str | N
     return bits, None
 
 
+def calculate_average_hash(path: Path, hash_size: int = 16) -> tuple[int | None, str | None]:
+    """Calcula average hash. Ayuda con la misma foto en distinto tamano/calidad."""
+    if Image is None or ImageOps is None:
+        return None, "Pillow no esta instalado"
+
+    try:
+        with Image.open(path) as image:
+            image = ImageOps.exif_transpose(image)
+            image = image.convert("L").resize((hash_size, hash_size), Image.Resampling.LANCZOS)
+            pixels = list(image.getdata())
+    except Exception as exc:
+        return None, str(exc)
+
+    average = sum(pixels) / len(pixels)
+    bits = 0
+    for value in pixels:
+        bits = (bits << 1) | int(value >= average)
+    return bits, None
+
+
 def hamming_distance(left: int, right: int) -> int:
     return (left ^ right).bit_count()
+
+
+def visual_match_reason(left: ImageInfo, right: ImageInfo, visual_threshold: int) -> str | None:
+    if left.width and left.height and right.width and right.height:
+        left_ratio = left.width / max(left.height, 1)
+        right_ratio = right.width / max(right.height, 1)
+        if abs(left_ratio - right_ratio) > 0.18:
+            return None
+
+    if left.visual_hash is not None and right.visual_hash is not None:
+        distance = hamming_distance(left.visual_hash, right.visual_hash)
+        if distance <= visual_threshold:
+            return f"visual dHash ({distance})"
+
+    if left.average_hash is not None and right.average_hash is not None:
+        distance = hamming_distance(left.average_hash, right.average_hash)
+        average_threshold = min(72, 18 + visual_threshold * 5)
+        if distance <= average_threshold:
+            return f"visual aHash ({distance})"
+
+    return None
 
 
 class UnionFind:
@@ -235,10 +276,13 @@ def build_image_info(files: list[Path], include_visual: bool) -> list[ImageInfo]
             continue
 
         visual_hash = None
+        average_hash = None
         visual_error = None
         width, height = read_image_dimensions(path)
         if include_visual:
             visual_hash, visual_error = calculate_dhash(path)
+            average_hash, average_error = calculate_average_hash(path)
+            visual_error = visual_error or average_error
 
         infos.append(
             ImageInfo(
@@ -249,6 +293,7 @@ def build_image_info(files: list[Path], include_visual: bool) -> list[ImageInfo]
                 width=width,
                 height=height,
                 visual_hash=visual_hash,
+                average_hash=average_hash,
                 visual_error=visual_error,
             )
         )
@@ -291,6 +336,7 @@ def find_duplicate_groups(
                         height=info.height,
                         sha256=digest,
                         visual_hash=info.visual_hash,
+                        average_hash=info.average_hash,
                         visual_error=info.visual_error,
                     )
                 )
@@ -307,13 +353,17 @@ def find_duplicate_groups(
 
     visual_pairs = 0
     if include_visual:
-        visual_infos = [info for info in info_by_id.values() if info.visual_hash is not None]
+        visual_infos = [
+            info
+            for info in info_by_id.values()
+            if info.visual_hash is not None or info.average_hash is not None
+        ]
         for i, left in enumerate(visual_infos):
             for right in visual_infos[i + 1 :]:
-                distance = hamming_distance(left.visual_hash or 0, right.visual_hash or 0)
-                if distance <= visual_threshold:
+                reason = visual_match_reason(left, right, visual_threshold)
+                if reason:
                     uf.union(left.file_id, right.file_id)
-                    reasons[frozenset((left.file_id, right.file_id))].add(f"visual ({distance})")
+                    reasons[frozenset((left.file_id, right.file_id))].add(reason)
                     visual_pairs += 1
 
     grouped_ids: dict[str, list[str]] = defaultdict(list)
@@ -456,4 +506,3 @@ def make_thumbnail(path: Path, max_size: int = 360) -> tuple[bytes, str]:
         output = io.BytesIO()
         image.save(output, format="JPEG", quality=82, optimize=True)
         return output.getvalue(), "image/jpeg"
-
