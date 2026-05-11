@@ -1,10 +1,11 @@
-# Detector de Imagenes Duplicadas
+# Detector de Archivos Duplicados
 
-App local para revisar fotos duplicadas o visualmente parecidas, encontrar posibles memes y detectar miniaturas o imagenes de baja calidad. Todo corre en tu maquina y los archivos descartados se mueven a una carpeta de respaldo.
+App local para revisar fotos, videos y documentos duplicados. Tambien puede encontrar imagenes visualmente parecidas, posibles memes y miniaturas de baja calidad. Todo corre en tu maquina y los archivos descartados se mueven a una carpeta de respaldo.
 
 ## Caracteristicas
 
 - Duplicados exactos por SHA-256.
+- Videos y documentos duplicados por coincidencia exacta.
 - Imagenes visualmente similares con hash perceptual.
 - La similitud visual combina `dHash` para bordes y `aHash` para composicion general, de modo que puede unir la misma foto aunque cambie tamano o compresion.
 - Prioridad automatica para conservar la imagen de mayor calidad/resolucion y luego la mas antigua.
@@ -25,11 +26,22 @@ Instala Pillow para que funcionen miniaturas, dimensiones, deteccion visual y re
 pip install pillow
 ```
 
+Opcional para mejores miniaturas:
+
+```powershell
+pip install pymupdf
+```
+
+`PyMuPDF` permite mostrar la primera pagina de PDFs. Para miniaturas reales de videos instala `ffmpeg` y dejalo disponible en el PATH.
+
+Si usas los scripts npm, `npm run setup` instala `pillow` y `pymupdf` en el Python que usa la app.
+
 ## Uso
 
 Forma rapida con Node/npm:
 
 ```powershell
+npm run setup
 npm start
 ```
 
@@ -69,7 +81,7 @@ duplicate_image_app.py  Entrada principal
 package.json            Scripts npm para iniciar rapido
 scripts/start.js        Busca Python y ejecuta la app
 server.py               Servidor HTTP y rutas API
-image_tools.py          Escaneo, hash, calidad, memes y miniaturas
+image_tools.py          Escaneo, hash, calidad, memes, videos y documentos
 file_actions.py         Movimiento seguro a respaldo
 models.py               Modelos de datos
 state.py                Estado del escaneo activo
@@ -79,7 +91,7 @@ web/index.html          Interfaz web
 
 ## Flujo recomendado
 
-1. Selecciona o escribe la carpeta de imagenes.
+1. Selecciona o escribe la carpeta de archivos.
 2. Deja activado `Detectar similares visuales` si quieres encontrar imagenes parecidas, no solo duplicados exactos.
 3. Activa `Encontrar memes` para revisar imagenes con posible texto superpuesto.
 4. Activa `Encontrar miniaturas/baja calidad` para revisar archivos pequenos o thumbnails.
@@ -89,10 +101,24 @@ web/index.html          Interfaz web
 
 ## Opciones
 
-- `Parecido permitido`: controla que tan flexibles son los grupos visuales. `0` exige imagenes casi identicas, `6` es el valor recomendado y valores mas altos encuentran fotos menos parecidas, con mas riesgo de falsos positivos.
-- `Max. imagenes`: cantidad maxima de imagenes a analizar. `0` analiza toda la carpeta.
+- `Parecido permitido`: controla que tan flexibles son los grupos visuales de imagenes. `0` exige imagenes casi identicas, `6` es el valor recomendado y valores mas altos encuentran fotos menos parecidas, con mas riesgo de falsos positivos. No aplica a videos o documentos.
+- `Max. archivos`: cantidad maxima de archivos a analizar. `0` analiza toda la carpeta.
 - `Encontrar memes`: usa nombres comunes y una heuristica visual de texto dentro de la imagen.
 - `Encontrar miniaturas/baja calidad`: detecta resoluciones pequenas y nombres tipicos de miniaturas/cache.
+
+## Tipos soportados
+
+- Imagenes: JPG, PNG, GIF, BMP, WebP, TIFF, AVIF, HEIC/HEIF si Pillow los soporta.
+- Videos: MP4, MOV, AVI, MKV, WebM, WMV, M4V, 3GP, MPEG/MPG.
+- Documentos/archivos: PDF, Word, Excel, PowerPoint, TXT, RTF, CSV, OpenDocument, ZIP, RAR y 7Z.
+
+Videos y documentos se comparan por hash exacto. La similitud visual solo aplica a imagenes.
+
+Miniaturas:
+
+- Videos: muestra un frame si `ffmpeg` esta disponible.
+- PDFs: muestra la primera pagina si `PyMuPDF` esta instalado, o si Pillow puede abrir PDFs en tu sistema.
+- Word, Excel, PowerPoint y comprimidos: muestran una tarjeta de tipo/extension, porque renderizarlos requiere herramientas externas.
 
 ## Seguridad
 

@@ -1,16 +1,5 @@
 const { spawnSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
-const path = require("node:path");
 const { findPython } = require("./python");
-
-const root = path.resolve(__dirname, "..");
-const app = path.join(root, "duplicate_image_app.py");
-const userArgs = process.argv.slice(2);
-
-if (!existsSync(app)) {
-  console.error(`No se encontro la app: ${app}`);
-  process.exit(1);
-}
 
 const python = findPython();
 
@@ -19,10 +8,13 @@ if (!python) {
   process.exit(1);
 }
 
+const packages = ["pillow", "pymupdf"];
+console.log(`Instalando dependencias: ${packages.join(", ")}`);
+
 const result = spawnSync(
   python.cmd,
-  [...python.args, app, ...userArgs],
-  { cwd: root, stdio: "inherit", shell: false }
+  [...python.args, "-m", "pip", "install", ...packages],
+  { stdio: "inherit", shell: false }
 );
 
 if (result.error) {

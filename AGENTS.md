@@ -2,7 +2,7 @@
 
 ## Proyecto
 
-Esta carpeta contiene una app local para detectar imagenes duplicadas, similares, memes y miniaturas de baja calidad.
+Esta carpeta contiene una app local para detectar imagenes, videos y documentos duplicados. En imagenes tambien detecta similares, memes y miniaturas de baja calidad.
 
 Archivos principales:
 
@@ -10,7 +10,7 @@ Archivos principales:
 - `package.json`: scripts npm para ejecutar la app rapido.
 - `scripts/start.js`: busca Python y lanza `duplicate_image_app.py`.
 - `server.py`: servidor HTTP y endpoints API.
-- `image_tools.py`: escaneo, hashing, calidad, memes y miniaturas.
+- `image_tools.py`: escaneo, hashing, calidad, memes, miniaturas, videos y documentos.
 - `file_actions.py`: movimiento seguro de descartes.
 - `models.py`: dataclasses y estado base.
 - `state.py`: estado global del escaneo activo.
@@ -41,11 +41,17 @@ Requiere Pillow para miniaturas, dimensiones, hash visual, baja calidad y detecc
 pip install pillow
 ```
 
+Opcional: `pip install pymupdf` para miniaturas de PDF y `ffmpeg` en PATH para miniaturas de video.
+
+Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo Python que ejecuta la app.
+
 ## Reglas de comportamiento
 
 - Los archivos nunca se borran directamente.
 - Los descartes se mueven a `_DUPLICADOS_ELIMINADOS` dentro de la carpeta analizada.
-- Para duplicados, la sugerencia inicial conserva la imagen de mayor calidad/resolucion; si empata, conserva la mas antigua.
+- Para duplicados de imagen, la sugerencia inicial conserva la imagen de mayor calidad/resolucion; si empata, conserva la mas antigua.
+- Para videos y documentos, la deteccion es exacta por hash SHA-256.
+- Para miniaturas, usar mejor esfuerzo: videos con `ffmpeg`, PDFs con `PyMuPDF`/Pillow, y placeholder para documentos que no se puedan renderizar.
 - En duplicados, la opcion `Mantener` define que imagen queda fuera de los descartes.
 - Cada grupo duplicado tiene `Seleccionar todas` para descartar todo el grupo, incluso la imagen marcada como mejor calidad.
 - En revisiones de memes/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.

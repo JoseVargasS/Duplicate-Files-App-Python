@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import mimetypes
 import os
+import shutil
+import subprocess
+import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from constants import BACKUP_DIR_NAME, IMAGE_EXTENSIONS
+from constants import BACKUP_DIR_NAME, DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS
 from models import ImageInfo
 
 try:
@@ -83,6 +87,9 @@ def hamming_distance(left: int, right: int) -> int:
 
 
 def visual_match_reason(left: ImageInfo, right: ImageInfo, visual_threshold: int) -> str | None:
+    if not is_image_file(left.path) or not is_image_file(right.path):
+        return None
+
     if left.width and left.height and right.width and right.height:
         left_ratio = left.width / max(left.height, 1)
         right_ratio = right.width / max(right.height, 1)
@@ -120,17 +127,39 @@ class UnionFind:
             self.parent[root_right] = root_left
 
 
-def get_image_files(directory: Path, limit: int = 0) -> list[Path]:
-    images: list[Path] = []
+def is_image_file(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_EXTENSIONS
+
+
+def is_video_file(path: Path) -> bool:
+    return path.suffix.lower() in VIDEO_EXTENSIONS
+
+
+def is_document_file(path: Path) -> bool:
+    return path.suffix.lower() in DOCUMENT_EXTENSIONS
+
+
+def file_kind(path: Path) -> str:
+    if is_image_file(path):
+        return "imagen"
+    if is_video_file(path):
+        return "video"
+    if is_document_file(path):
+        return "documento"
+    return "archivo"
+
+
+def get_supported_files(directory: Path, limit: int = 0) -> list[Path]:
+    found: list[Path] = []
     for root, dirs, files in os.walk(directory):
         dirs[:] = [dirname for dirname in dirs if dirname != BACKUP_DIR_NAME]
         for filename in files:
             path = Path(root) / filename
-            if path.suffix.lower() in IMAGE_EXTENSIONS:
-                images.append(path)
-                if limit and len(images) >= limit:
-                    return images
-    return images
+            if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                found.append(path)
+                if limit and len(found) >= limit:
+                    return found
+    return found
 
 
 def image_quality_score(info: ImageInfo) -> tuple[int, int]:
@@ -152,7 +181,7 @@ def choose_best_quality_oldest(files: list[ImageInfo]) -> ImageInfo:
 
 
 def read_image_dimensions(path: Path) -> tuple[int, int]:
-    if Image is None or ImageOps is None:
+    if not is_image_file(path) or Image is None or ImageOps is None:
         return 0, 0
     try:
         with Image.open(path) as image:
@@ -163,6 +192,8 @@ def read_image_dimensions(path: Path) -> tuple[int, int]:
 
 
 def low_quality_reason(info: ImageInfo) -> str | None:
+    if not is_image_file(info.path):
+        return None
     pixels = info.width * info.height
     shortest_side = min(info.width, info.height) if info.width and info.height else 0
     if pixels and pixels <= 360_000:
@@ -223,6 +254,8 @@ def text_overlay_score(image: Any, y_start: int, y_end: int) -> float:
 
 
 def meme_reason(info: ImageInfo) -> str | None:
+    if not is_image_file(info.path):
+        return None
     name = info.path.name.lower()
     meme_tokens = (
         "meme",
@@ -279,7 +312,7 @@ def build_image_info(files: list[Path], include_visual: bool) -> list[ImageInfo]
         average_hash = None
         visual_error = None
         width, height = read_image_dimensions(path)
-        if include_visual:
+        if include_visual and is_image_file(path):
             visual_hash, visual_error = calculate_dhash(path)
             average_hash, average_error = calculate_average_hash(path)
             visual_error = visual_error or average_error
@@ -308,8 +341,8 @@ def find_duplicate_groups(
     include_memes: bool,
     include_low_quality: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, ImageInfo], dict[str, Any]]:
-    image_paths = get_image_files(directory, limit=limit)
-    infos = build_image_info(image_paths, include_visual=include_visual)
+    file_paths = get_supported_files(directory, limit=limit)
+    infos = build_image_info(file_paths, include_visual=include_visual)
     info_by_id = {info.file_id: info for info in infos}
     uf = UnionFind(list(info_by_id))
     reasons: dict[frozenset[str], set[str]] = defaultdict(set)
@@ -411,7 +444,7 @@ def find_duplicate_groups(
         groups.append(group)
 
     metadata = {
-        "scanned": len(image_paths),
+        "scanned": len(file_paths),
         "readable": len(infos),
         "groups": sum(1 for group in groups if group.get("kind") == "duplicate"),
         "review_groups": len(review_groups),
@@ -419,6 +452,9 @@ def find_duplicate_groups(
         "review_candidates": sum(len(group["files"]) for group in review_groups),
         "visual_available": Image is not None,
         "visual_pairs": visual_pairs,
+        "supported_images": sum(1 for info in infos if is_image_file(info.path)),
+        "supported_videos": sum(1 for info in infos if is_video_file(info.path)),
+        "supported_documents": sum(1 for info in infos if is_document_file(info.path)),
         "backup_dir_name": BACKUP_DIR_NAME,
     }
     return groups, info_by_id, metadata
@@ -477,6 +513,7 @@ def serialize_info(info: ImageInfo, base_dir: Path) -> dict[str, Any]:
         "width": info.width,
         "height": info.height,
         "dimensions_text": f"{info.width}x{info.height}" if info.width and info.height else "sin dimensiones",
+        "kind": file_kind(info.path),
         "quality_score": image_quality_score(info)[0],
         "mtime": info.mtime,
         "mtime_text": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(info.mtime)),
@@ -495,6 +532,20 @@ def human_size(size: int) -> str:
 
 
 def make_thumbnail(path: Path, max_size: int = 360) -> tuple[bytes, str]:
+    if is_video_file(path):
+        video_thumb = make_video_thumbnail(path, max_size=max_size)
+        if video_thumb is not None:
+            return video_thumb, "image/jpeg"
+        return make_file_placeholder(path, detail="Instala ffmpeg para ver miniatura real"), "image/svg+xml"
+
+    if is_document_file(path):
+        document_thumb = make_document_thumbnail(path, max_size=max_size)
+        if document_thumb is not None:
+            return document_thumb, "image/jpeg"
+        if path.suffix.lower() == ".pdf":
+            return make_file_placeholder(path, detail="Instala PyMuPDF: npm run setup"), "image/svg+xml"
+        return make_file_placeholder(path), "image/svg+xml"
+
     if Image is None or ImageOps is None:
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         return path.read_bytes(), mime
@@ -506,3 +557,122 @@ def make_thumbnail(path: Path, max_size: int = 360) -> tuple[bytes, str]:
         output = io.BytesIO()
         image.save(output, format="JPEG", quality=82, optimize=True)
         return output.getvalue(), "image/jpeg"
+
+
+def make_video_thumbnail(path: Path, max_size: int = 360) -> bytes | None:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_file:
+        output_path = Path(temp_file.name)
+
+    try:
+        command = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            "1",
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            f"scale='min({max_size},iw)':-2",
+            str(output_path),
+        ]
+        result = subprocess.run(command, capture_output=True, timeout=12, check=False)
+        if result.returncode != 0 or not output_path.exists() or output_path.stat().st_size == 0:
+            return None
+
+        if Image is not None and ImageOps is not None:
+            with Image.open(output_path) as image:
+                image.thumbnail((max_size, max_size))
+                image = image.convert("RGB")
+                output = io.BytesIO()
+                image.save(output, format="JPEG", quality=84, optimize=True)
+                return output.getvalue()
+
+        return output_path.read_bytes()
+    except Exception:
+        return None
+    finally:
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def make_document_thumbnail(path: Path, max_size: int = 360) -> bytes | None:
+    if path.suffix.lower() == ".pdf":
+        pdf_thumb = make_pdf_thumbnail(path, max_size=max_size)
+        if pdf_thumb is not None:
+            return pdf_thumb
+    return None
+
+
+def make_pdf_thumbnail(path: Path, max_size: int = 360) -> bytes | None:
+    try:
+        import fitz  # type: ignore
+
+        document = fitz.open(path)
+        try:
+            if document.page_count < 1:
+                return None
+            page = document.load_page(0)
+            scale = max_size / max(page.rect.width, page.rect.height)
+            scale = max(scale, 0.25)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            image_bytes = pixmap.tobytes("png")
+        finally:
+            document.close()
+
+        if Image is None:
+            return image_bytes
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image.thumbnail((max_size, max_size))
+            image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=84, optimize=True)
+            return output.getvalue()
+    except Exception:
+        pass
+
+    if Image is None or ImageOps is None:
+        return None
+
+    try:
+        with Image.open(path) as image:
+            image.seek(0)
+            image.thumbnail((max_size, max_size))
+            image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=84, optimize=True)
+            return output.getvalue()
+    except Exception:
+        return None
+
+
+def make_file_placeholder(path: Path, detail: str = "") -> bytes:
+    kind = file_kind(path)
+    ext = path.suffix.upper().lstrip(".") or "FILE"
+    color = {
+        "video": "#3b82f6",
+        "documento": "#f59e0b",
+    }.get(kind, "#64748b")
+    label = html.escape(kind.upper())
+    ext_label = html.escape(ext[:8])
+    name = html.escape(path.name[:42])
+    detail_text = html.escape(detail or "miniatura no disponible")
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="360" height="240" viewBox="0 0 360 240">
+  <rect width="360" height="240" fill="#0c1015"/>
+  <rect x="92" y="36" width="176" height="132" rx="10" fill="#121820" stroke="{color}" stroke-width="3"/>
+  <text x="180" y="92" text-anchor="middle" font-family="Segoe UI, Arial" font-size="22" font-weight="700" fill="{color}">{ext_label}</text>
+  <text x="180" y="126" text-anchor="middle" font-family="Segoe UI, Arial" font-size="16" fill="#f2f5f8">{label}</text>
+  <text x="180" y="154" text-anchor="middle" font-family="Segoe UI, Arial" font-size="11" fill="#a8b3c2">{detail_text}</text>
+  <text x="180" y="204" text-anchor="middle" font-family="Segoe UI, Arial" font-size="13" fill="#a8b3c2">{name}</text>
+</svg>"""
+    return svg.encode("utf-8")
