@@ -110,6 +110,12 @@ def visual_match_reason(left: ImageInfo, right: ImageInfo, visual_threshold: int
     return None
 
 
+def visual_bucket(info: ImageInfo) -> int:
+    if not info.width or not info.height:
+        return 0
+    return round((info.width / max(info.height, 1)) * 20)
+
+
 class UnionFind:
     def __init__(self, items: list[str]) -> None:
         self.parent = {item: item for item in items}
@@ -149,13 +155,29 @@ def file_kind(path: Path) -> str:
     return "archivo"
 
 
-def get_supported_files(directory: Path, limit: int = 0) -> list[Path]:
+def get_supported_files(
+    directory: Path,
+    limit: int = 0,
+    include_images: bool = True,
+    include_videos: bool = False,
+    include_documents: bool = False,
+) -> list[Path]:
     found: list[Path] = []
+    enabled_extensions: set[str] = set()
+    if include_images:
+        enabled_extensions.update(IMAGE_EXTENSIONS)
+    if include_videos:
+        enabled_extensions.update(VIDEO_EXTENSIONS)
+    if include_documents:
+        enabled_extensions.update(DOCUMENT_EXTENSIONS)
+    if not enabled_extensions:
+        return found
+
     for root, dirs, files in os.walk(directory):
         dirs[:] = [dirname for dirname in dirs if dirname != BACKUP_DIR_NAME]
         for filename in files:
             path = Path(root) / filename
-            if path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if path.suffix.lower() in enabled_extensions:
                 found.append(path)
                 if limit and len(found) >= limit:
                     return found
@@ -300,7 +322,7 @@ def meme_reason(info: ImageInfo) -> str | None:
     return None
 
 
-def build_image_info(files: list[Path], include_visual: bool) -> list[ImageInfo]:
+def build_image_info(files: list[Path], include_visual: bool, include_image_review: bool) -> list[ImageInfo]:
     infos: list[ImageInfo] = []
     for path in files:
         try:
@@ -311,7 +333,10 @@ def build_image_info(files: list[Path], include_visual: bool) -> list[ImageInfo]
         visual_hash = None
         average_hash = None
         visual_error = None
-        width, height = read_image_dimensions(path)
+        width, height = (0, 0)
+        should_analyze_image = is_image_file(path) and (include_visual or include_image_review)
+        if should_analyze_image:
+            width, height = read_image_dimensions(path)
         if include_visual and is_image_file(path):
             visual_hash, visual_error = calculate_dhash(path)
             average_hash, average_error = calculate_average_hash(path)
@@ -340,9 +365,22 @@ def find_duplicate_groups(
     visual_threshold: int,
     include_memes: bool,
     include_low_quality: bool,
+    include_images: bool = True,
+    include_videos: bool = False,
+    include_documents: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, ImageInfo], dict[str, Any]]:
-    file_paths = get_supported_files(directory, limit=limit)
-    infos = build_image_info(file_paths, include_visual=include_visual)
+    file_paths = get_supported_files(
+        directory,
+        limit=limit,
+        include_images=include_images,
+        include_videos=include_videos,
+        include_documents=include_documents,
+    )
+    infos = build_image_info(
+        file_paths,
+        include_visual=include_visual,
+        include_image_review=include_memes or include_low_quality,
+    )
     info_by_id = {info.file_id: info for info in infos}
     uf = UnionFind(list(info_by_id))
     reasons: dict[frozenset[str], set[str]] = defaultdict(set)
@@ -385,19 +423,46 @@ def find_duplicate_groups(
             info_by_id[first] = exact_infos[0]
 
     visual_pairs = 0
+    visual_comparisons = 0
+    visual_limited = False
     if include_visual:
         visual_infos = [
             info
             for info in info_by_id.values()
             if info.visual_hash is not None or info.average_hash is not None
         ]
-        for i, left in enumerate(visual_infos):
-            for right in visual_infos[i + 1 :]:
-                reason = visual_match_reason(left, right, visual_threshold)
-                if reason:
-                    uf.union(left.file_id, right.file_id)
-                    reasons[frozenset((left.file_id, right.file_id))].add(reason)
-                    visual_pairs += 1
+        visual_groups: dict[int, list[ImageInfo]] = defaultdict(list)
+        for info in visual_infos:
+            visual_groups[visual_bucket(info)].append(info)
+
+        max_visual_comparisons = 350_000
+        seen_pairs: set[frozenset[str]] = set()
+        for bucket, bucket_infos in visual_groups.items():
+            candidates: list[ImageInfo] = []
+            for nearby_bucket in (bucket - 1, bucket, bucket + 1):
+                candidates.extend(visual_groups.get(nearby_bucket, []))
+
+            for left in bucket_infos:
+                for right in candidates:
+                    if left.file_id >= right.file_id:
+                        continue
+                    pair_key = frozenset((left.file_id, right.file_id))
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+                    visual_comparisons += 1
+                    if visual_comparisons > max_visual_comparisons:
+                        visual_limited = True
+                        break
+                    reason = visual_match_reason(left, right, visual_threshold)
+                    if reason:
+                        uf.union(left.file_id, right.file_id)
+                        reasons[pair_key].add(reason)
+                        visual_pairs += 1
+                if visual_limited:
+                    break
+            if visual_limited:
+                break
 
     grouped_ids: dict[str, list[str]] = defaultdict(list)
     for file_id in info_by_id:
@@ -452,9 +517,14 @@ def find_duplicate_groups(
         "review_candidates": sum(len(group["files"]) for group in review_groups),
         "visual_available": Image is not None,
         "visual_pairs": visual_pairs,
+        "visual_comparisons": visual_comparisons,
+        "visual_limited": visual_limited,
         "supported_images": sum(1 for info in infos if is_image_file(info.path)),
         "supported_videos": sum(1 for info in infos if is_video_file(info.path)),
         "supported_documents": sum(1 for info in infos if is_document_file(info.path)),
+        "include_images": include_images,
+        "include_videos": include_videos,
+        "include_documents": include_documents,
         "backup_dir_name": BACKUP_DIR_NAME,
     }
     return groups, info_by_id, metadata

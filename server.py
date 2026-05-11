@@ -62,6 +62,10 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             text_response(self, load_index_html(), content_type="text/html; charset=utf-8")
             return
+        if parsed.path == "/favicon.ico":
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+            return
         if parsed.path == "/api/image":
             self.handle_image(parsed.query)
             return
@@ -115,9 +119,12 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
             raise ValueError("Selecciona una carpeta valida")
 
         limit = int(payload.get("limit") or 0)
-        include_visual = bool(payload.get("include_visual", True))
+        include_visual = bool(payload.get("include_visual", False))
         include_memes = bool(payload.get("include_memes", False))
         include_low_quality = bool(payload.get("include_low_quality", False))
+        include_images = bool(payload.get("include_images", True))
+        include_videos = bool(payload.get("include_videos", False))
+        include_documents = bool(payload.get("include_documents", False))
         visual_threshold = int(payload.get("visual_threshold") or 6)
         visual_threshold = max(0, min(20, visual_threshold))
 
@@ -128,6 +135,9 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
             visual_threshold=visual_threshold,
             include_memes=include_memes,
             include_low_quality=include_low_quality,
+            include_images=include_images,
+            include_videos=include_videos,
+            include_documents=include_documents,
         )
 
         with STATE.lock:

@@ -51,9 +51,11 @@ Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo
 - Los descartes se mueven a `_DUPLICADOS_ELIMINADOS` dentro de la carpeta analizada.
 - Para duplicados de imagen, la sugerencia inicial conserva la imagen de mayor calidad/resolucion; si empata, conserva la mas antigua.
 - Para videos y documentos, la deteccion es exacta por hash SHA-256.
+- Por defecto, la UI debe favorecer duplicados exactos y rapidez: imagenes activadas, videos/documentos desactivados, similares visuales desactivado.
 - Para miniaturas, usar mejor esfuerzo: videos con `ffmpeg`, PDFs con `PyMuPDF`/Pillow, y placeholder para documentos que no se puedan renderizar.
 - En duplicados, la opcion `Mantener` define que imagen queda fuera de los descartes.
 - Cada grupo duplicado tiene `Seleccionar todas` para descartar todo el grupo, incluso la imagen marcada como mejor calidad.
+- Cada grupo duplicado tiene `Deseleccionar grupo` para no mover nada de ese grupo.
 - En revisiones de memes/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.
 - La deteccion de memes es heuristica: combina nombres comunes y senales visuales de texto superpuesto dentro de la imagen.
 - La deteccion de miniaturas/baja calidad usa dimensiones pequenas y nombres tipo `thumb`, `thumbnail`, `miniatura`, `preview` o `cache`.

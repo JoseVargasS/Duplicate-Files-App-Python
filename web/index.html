@@ -182,12 +182,25 @@
       border-color: var(--danger-strong);
       box-shadow: 0 0 0 2px rgba(226, 74, 64, 0.26), var(--shadow);
     }
+    .group.none-selected {
+      border-color: var(--warn);
+      box-shadow: 0 0 0 2px rgba(240, 179, 79, 0.22), var(--shadow);
+    }
     .group.all-selected .group-head {
       background: rgba(199, 52, 43, 0.18);
+    }
+    .group.none-selected .group-head {
+      background: rgba(240, 179, 79, 0.12);
     }
     .group.all-selected .group-title::after {
       content: " - todas seleccionadas";
       color: var(--danger-strong);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .group.none-selected .group-title::after {
+      content: " - nada seleccionado";
+      color: var(--warn);
       font-size: 12px;
       font-weight: 700;
     }
@@ -333,9 +346,12 @@
       <button class="secondary" id="chooseBtn" type="button">Seleccionar carpeta</button>
       <button id="scanBtn" type="button">Analizar</button>
       <div class="settings" style="grid-column: 1 / -1;">
-        <label><input id="visual" type="checkbox" checked> Detectar similares visuales</label>
+        <label><input id="typeImages" type="checkbox" checked> Imagenes</label>
+        <label><input id="typeVideos" type="checkbox"> Videos</label>
+        <label><input id="typeDocuments" type="checkbox"> Documentos</label>
+        <label><input id="visual" type="checkbox"> Detectar fotos parecidas (lento)</label>
         <label><input id="memes" type="checkbox"> Encontrar memes</label>
-        <label><input id="lowQuality" type="checkbox" checked> Encontrar miniaturas/baja calidad</label>
+        <label><input id="lowQuality" type="checkbox"> Encontrar miniaturas/baja calidad</label>
         <label>Parecido permitido <input id="threshold" type="number" min="0" max="20" value="6"></label>
         <label>Max. archivos <input id="limit" type="number" min="0" value="0"></label>
         <span>Parecido permitido aplica a imagenes: 0 casi iguales, 6 recomendado, mas alto agrupa fotos menos parecidas. Max. archivos: 0 analiza todo.</span>
@@ -359,6 +375,9 @@
     const summaryEl = document.querySelector("#summary");
     const resultsEl = document.querySelector("#results");
     const visualEl = document.querySelector("#visual");
+    const typeImagesEl = document.querySelector("#typeImages");
+    const typeVideosEl = document.querySelector("#typeVideos");
+    const typeDocumentsEl = document.querySelector("#typeDocuments");
     const memesEl = document.querySelector("#memes");
     const lowQualityEl = document.querySelector("#lowQuality");
     const thresholdEl = document.querySelector("#threshold");
@@ -417,6 +436,10 @@
         setStatus("Selecciona o escribe una carpeta primero.", "warning");
         return;
       }
+      if (!typeImagesEl.checked && !typeVideosEl.checked && !typeDocumentsEl.checked) {
+        setStatus("Selecciona al menos un tipo: imagenes, videos o documentos.", "warning");
+        return;
+      }
 
       try {
         setBusy(true);
@@ -428,6 +451,9 @@
           include_visual: visualEl.checked,
           include_memes: memesEl.checked,
           include_low_quality: lowQualityEl.checked,
+          include_images: typeImagesEl.checked,
+          include_videos: typeVideosEl.checked,
+          include_documents: typeDocumentsEl.checked,
           visual_threshold: Number(thresholdEl.value || 6),
           limit: Number(limitEl.value || 0)
         });
@@ -438,7 +464,10 @@
         const visualWarning = payload.metadata && !payload.metadata.visual_available
           ? " Pillow no esta instalado, asi que solo se detectaron duplicados exactos."
           : "";
-        setStatus(`Analisis completo.${visualWarning}`);
+        const visualLimitWarning = payload.metadata && payload.metadata.visual_limited
+          ? " Se limitaron comparaciones visuales para terminar mas rapido; usa Max. archivos si quieres revisar por partes."
+          : "";
+        setStatus(`Analisis completo.${visualWarning}${visualLimitWarning}`, visualLimitWarning ? "warning" : "");
       } catch (error) {
         setStatus(error.message, "warning");
       } finally {
@@ -524,7 +553,7 @@
         }).join("");
 
         return `
-          <section class="group" data-group-id="${group.group_id}" data-kind="${escapeHtml(group.kind || "duplicate")}" data-discard-all="false">
+          <section class="group" data-group-id="${group.group_id}" data-kind="${escapeHtml(group.kind || "duplicate")}" data-discard-all="false" data-discard-none="false">
             <div class="group-head">
               <div>
                 <span class="group-title">${group.kind === "review" ? "Revision" : "Grupo"} #${group.group_id}</span>
@@ -532,6 +561,7 @@
               </div>
               <div class="group-actions">
                 ${group.kind === "review" ? "" : `<button class="secondary" type="button" data-action="select-all-group" data-group-id="${group.group_id}">Seleccionar todas</button>`}
+                ${group.kind === "review" ? "" : `<button class="secondary" type="button" data-action="select-none-group" data-group-id="${group.group_id}">Deseleccionar grupo</button>`}
                 <button class="danger" type="button" data-action="move-selected-group" data-group-id="${group.group_id}">
                   Mover descartados
                 </button>
@@ -547,9 +577,12 @@
       if (!event.target.matches('input[type="radio"]')) return;
       const groupEl = event.target.closest(".group");
       groupEl.dataset.discardAll = "false";
-      groupEl.classList.remove("all-selected");
+      groupEl.dataset.discardNone = "false";
+      groupEl.classList.remove("all-selected", "none-selected");
       const selectAllBtn = groupEl.querySelector('button[data-action="select-all-group"]');
       if (selectAllBtn) selectAllBtn.textContent = "Seleccionar todas";
+      const selectNoneBtn = groupEl.querySelector('button[data-action="select-none-group"]');
+      if (selectNoneBtn) selectNoneBtn.textContent = "Deseleccionar grupo";
       groupEl.querySelectorAll(".image-card").forEach(card => card.classList.remove("keep", "selected"));
       const card = event.target.closest(".image-card");
       card.classList.add("keep");
@@ -595,6 +628,9 @@
         const groupId = Number(groupEl.dataset.groupId);
         const group = currentGroups.find(item => item.group_id === groupId);
         if (!group) return;
+        if (groupEl.dataset.discardNone === "true") {
+          return;
+        }
         if (groupEl.dataset.discardAll === "true") {
           group.files.forEach(file => ids.push(file.id));
           return;
@@ -663,11 +699,33 @@
       const groupEl = button.closest(".group");
       const shouldSelectAll = groupEl.dataset.discardAll !== "true";
       groupEl.dataset.discardAll = shouldSelectAll ? "true" : "false";
+      groupEl.dataset.discardNone = "false";
       groupEl.classList.toggle("all-selected", shouldSelectAll);
+      groupEl.classList.remove("none-selected");
       groupEl.querySelectorAll(".image-card").forEach(card => {
         card.classList.toggle("selected", shouldSelectAll || !card.classList.contains("keep"));
       });
       button.textContent = shouldSelectAll ? "Usar mantener" : "Seleccionar todas";
+      const selectNoneBtn = groupEl.querySelector('button[data-action="select-none-group"]');
+      if (selectNoneBtn) selectNoneBtn.textContent = "Deseleccionar grupo";
+      updateSelectionCount();
+    });
+
+    resultsEl.addEventListener("click", event => {
+      const button = event.target.closest('button[data-action="select-none-group"]');
+      if (!button) return;
+      const groupEl = button.closest(".group");
+      const shouldSelectNone = groupEl.dataset.discardNone !== "true";
+      groupEl.dataset.discardNone = shouldSelectNone ? "true" : "false";
+      groupEl.dataset.discardAll = "false";
+      groupEl.classList.toggle("none-selected", shouldSelectNone);
+      groupEl.classList.remove("all-selected");
+      groupEl.querySelectorAll(".image-card").forEach(card => {
+        card.classList.toggle("selected", !shouldSelectNone && !card.classList.contains("keep"));
+      });
+      button.textContent = shouldSelectNone ? "Usar mantener" : "Deseleccionar grupo";
+      const selectAllBtn = groupEl.querySelector('button[data-action="select-all-group"]');
+      if (selectAllBtn) selectAllBtn.textContent = "Seleccionar todas";
       updateSelectionCount();
     });
 
