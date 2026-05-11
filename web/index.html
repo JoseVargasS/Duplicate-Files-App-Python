@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Detector de imagenes duplicadas</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111418;
+      --panel: #191f27;
+      --panel-2: #202833;
+      --ink: #f2f5f8;
+      --muted: #a8b3c2;
+      --line: #313b49;
+      --accent: #2aa889;
+      --accent-strong: #35caa5;
+      --danger: #c7342b;
+      --danger-strong: #e24a40;
+      --warn: #f0b34f;
+      --soft: #19372f;
+      --shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      padding: 22px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 22px auto 48px;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      align-items: end;
+      padding: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type="text"], input[type="number"] {
+      width: 100%;
+      height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-size: 14px;
+      background: #10151b;
+      color: var(--ink);
+    }
+    .settings {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .settings label {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0;
+      font-size: 13px;
+    }
+    .settings input[type="number"] {
+      width: 76px;
+      height: 32px;
+    }
+    button {
+      height: 38px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 0 14px;
+      font-weight: 650;
+      font-size: 14px;
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+    }
+    button:hover { background: var(--accent-strong); }
+    button.secondary {
+      background: #121820;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    button.secondary:hover { background: #202833; }
+    button.danger { background: var(--danger); }
+    button.danger:hover { background: var(--danger-strong); }
+    button:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+    .summary {
+      margin: 16px 0;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .metric b {
+      display: block;
+      font-size: 21px;
+      margin-bottom: 3px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    #status {
+      margin: 14px 0;
+      min-height: 22px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .warning {
+      color: var(--warn);
+      font-weight: 600;
+    }
+    #results {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      align-items: start;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin: 14px 0;
+      padding: 12px 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    .actions span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .group {
+      margin: 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--panel-2);
+      border-bottom: 1px solid var(--line);
+    }
+    .group-title {
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .group-reason {
+      color: var(--muted);
+      font-size: 13px;
+      margin-left: 8px;
+      font-weight: 500;
+    }
+    .images {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 12px;
+      padding: 14px;
+    }
+    .image-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #121820;
+      display: grid;
+      grid-template-rows: 190px auto;
+      cursor: pointer;
+    }
+    .image-card.keep,
+    .image-card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(23, 107, 93, 0.18);
+    }
+    .thumb {
+      width: 100%;
+      height: 190px;
+      object-fit: contain;
+      background: #0c1015;
+    }
+    .meta {
+      padding: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 0;
+    }
+    .name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink);
+      overflow-wrap: anywhere;
+      margin-bottom: 6px;
+    }
+    .path {
+      overflow-wrap: anywhere;
+      line-height: 1.35;
+      margin: 7px 0;
+    }
+    .choice {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 8px;
+    }
+    .pill {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--accent-strong);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 42px 12px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      grid-column: 1 / -1;
+    }
+    @media (min-width: 1380px) {
+      main { width: min(1500px, calc(100% - 32px)); }
+      #results { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 760px) {
+      header { padding: 18px 16px 10px; }
+      main { width: calc(100% - 20px); margin-top: 12px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .summary { grid-template-columns: repeat(2, 1fr); }
+      .actions { align-items: stretch; flex-direction: column; }
+      #results { grid-template-columns: 1fr; }
+      .group-head { align-items: flex-start; flex-direction: column; }
+      .images { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Detector de imagenes duplicadas</h1>
+  </header>
+  <main>
+    <section class="toolbar">
+      <div>
+        <label for="directory">Carpeta a analizar</label>
+        <input id="directory" type="text" placeholder="Ejemplo: C:\Users\TuUsuario\Pictures">
+      </div>
+      <button class="secondary" id="chooseBtn" type="button">Seleccionar carpeta</button>
+      <button id="scanBtn" type="button">Analizar</button>
+      <div class="settings" style="grid-column: 1 / -1;">
+        <label><input id="visual" type="checkbox" checked> Detectar similares visuales</label>
+        <label><input id="memes" type="checkbox"> Encontrar memes</label>
+        <label><input id="lowQuality" type="checkbox" checked> Encontrar miniaturas/baja calidad</label>
+        <label>Umbral visual <input id="threshold" type="number" min="0" max="20" value="6"></label>
+        <label>Limite <input id="limit" type="number" min="0" value="0"></label>
+        <span>0 analiza todo. Umbral mayor encuentra mas parecidas, pero puede incluir falsos positivos.</span>
+      </div>
+    </section>
+
+    <div id="status"></div>
+    <section id="summary" class="summary" hidden></section>
+    <section id="bulkActions" class="actions" hidden>
+      <span id="selectionCount">0 archivos seleccionados para mover</span>
+      <button class="danger" id="moveAllBtn" type="button">Mover descartados seleccionados</button>
+    </section>
+    <section id="results"></section>
+  </main>
+
+  <script>
+    const directoryEl = document.querySelector("#directory");
+    const chooseBtn = document.querySelector("#chooseBtn");
+    const scanBtn = document.querySelector("#scanBtn");
+    const statusEl = document.querySelector("#status");
+    const summaryEl = document.querySelector("#summary");
+    const resultsEl = document.querySelector("#results");
+    const visualEl = document.querySelector("#visual");
+    const memesEl = document.querySelector("#memes");
+    const lowQualityEl = document.querySelector("#lowQuality");
+    const thresholdEl = document.querySelector("#threshold");
+    const limitEl = document.querySelector("#limit");
+    const bulkActionsEl = document.querySelector("#bulkActions");
+    const selectionCountEl = document.querySelector("#selectionCount");
+    const moveAllBtn = document.querySelector("#moveAllBtn");
+
+    let currentGroups = [];
+
+    function setBusy(isBusy) {
+      chooseBtn.disabled = isBusy;
+      scanBtn.disabled = isBusy;
+      moveAllBtn.disabled = isBusy;
+    }
+
+    function setStatus(message, kind = "") {
+      statusEl.className = kind;
+      statusEl.textContent = message;
+    }
+
+    async function postJson(url, data = {}) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "Ocurrio un error");
+      }
+      return payload;
+    }
+
+    chooseBtn.addEventListener("click", async () => {
+      try {
+        setBusy(true);
+        setStatus("Abriendo selector de carpetas...");
+        const payload = await postJson("/api/choose-folder");
+        if (payload.directory) {
+          directoryEl.value = payload.directory;
+          setStatus("Carpeta seleccionada.");
+        } else {
+          setStatus("No se selecciono carpeta.");
+        }
+      } catch (error) {
+        setStatus(error.message, "warning");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    scanBtn.addEventListener("click", async () => {
+      const directory = directoryEl.value.trim();
+      if (!directory) {
+        setStatus("Selecciona o escribe una carpeta primero.", "warning");
+        return;
+      }
+
+      try {
+        setBusy(true);
+        resultsEl.innerHTML = "";
+        summaryEl.hidden = true;
+        setStatus("Analizando imagenes. Si hay muchas fotos, puede tardar...");
+        const payload = await postJson("/api/scan", {
+          directory,
+          include_visual: visualEl.checked,
+          include_memes: memesEl.checked,
+          include_low_quality: lowQualityEl.checked,
+          visual_threshold: Number(thresholdEl.value || 6),
+          limit: Number(limitEl.value || 0)
+        });
+        currentGroups = payload.groups || [];
+        renderSummary(payload.metadata || {});
+        renderGroups(currentGroups);
+        updateSelectionCount();
+        const visualWarning = payload.metadata && !payload.metadata.visual_available
+          ? " Pillow no esta instalado, asi que solo se detectaron duplicados exactos."
+          : "";
+        setStatus(`Analisis completo.${visualWarning}`);
+      } catch (error) {
+        setStatus(error.message, "warning");
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    function renderSummary(meta) {
+      summaryEl.hidden = false;
+      summaryEl.innerHTML = `
+        <article class="metric"><b>${meta.scanned || 0}</b><span>imagenes encontradas</span></article>
+        <article class="metric"><b>${meta.groups || 0}</b><span>grupos duplicados</span></article>
+        <article class="metric"><b>${meta.to_remove || 0}</b><span>archivos sugeridos para mover</span></article>
+        <article class="metric"><b>${meta.review_candidates || 0}</b><span>memes/miniaturas para revisar</span></article>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function renderGroups(groups) {
+      if (!groups.length) {
+        resultsEl.innerHTML = '<div class="empty">No se encontraron duplicados, memes o miniaturas con la configuracion actual.</div>';
+        bulkActionsEl.hidden = true;
+        return;
+      }
+
+      bulkActionsEl.hidden = false;
+      resultsEl.innerHTML = groups.map(group => {
+        const filesHtml = group.files.map(file => {
+          const isKeep = file.id === group.keep_id;
+          const isReview = group.kind === "review";
+          const moveChecked = isReview || !isKeep;
+          return `
+            <article class="image-card ${isKeep ? "keep" : ""} ${moveChecked ? "selected" : ""}" data-file-id="${file.id}">
+              <img class="thumb" src="/api/image?id=${encodeURIComponent(file.id)}" alt="${escapeHtml(file.name)}" loading="lazy">
+              <div class="meta">
+                <div class="name">${escapeHtml(file.name)}</div>
+                <div>${escapeHtml(file.size_text)} - ${escapeHtml(file.dimensions_text)} - ${escapeHtml(file.mtime_text)}</div>
+                <div class="path">${escapeHtml(file.relative)}</div>
+                <div class="choice">
+                  <label><input class="discard-check" type="checkbox" value="${file.id}" ${moveChecked ? "checked" : ""}> Mover</label>
+                  ${isReview ? "" : `<label><input type="radio" name="keep-${group.group_id}" value="${file.id}" ${isKeep ? "checked" : ""}> Mantener</label>`}
+                  ${isKeep ? '<span class="pill">mejor calidad</span>' : ""}
+                </div>
+              </div>
+            </article>
+          `;
+        }).join("");
+
+        return `
+          <section class="group" data-group-id="${group.group_id}" data-kind="${escapeHtml(group.kind || "duplicate")}">
+            <div class="group-head">
+              <div>
+                <span class="group-title">${group.kind === "review" ? "Revision" : "Grupo"} #${group.group_id}</span>
+                <span class="group-reason">${escapeHtml(group.reason)}</span>
+              </div>
+              <button class="danger" type="button" data-action="move-selected-group" data-group-id="${group.group_id}">
+                Mover descartados
+              </button>
+            </div>
+            <div class="images">${filesHtml}</div>
+          </section>
+        `;
+      }).join("");
+    }
+
+    resultsEl.addEventListener("change", event => {
+      if (!event.target.matches('input[type="radio"]')) return;
+      const groupEl = event.target.closest(".group");
+      groupEl.querySelectorAll(".image-card").forEach(card => card.classList.remove("keep"));
+      const card = event.target.closest(".image-card");
+      card.classList.add("keep");
+      const discardCheck = card.querySelector(".discard-check");
+      if (discardCheck) {
+        discardCheck.checked = false;
+        card.classList.remove("selected");
+      }
+      updateSelectionCount();
+    });
+
+    resultsEl.addEventListener("change", event => {
+      if (!event.target.matches('.discard-check')) return;
+      event.target.closest(".image-card").classList.toggle("selected", event.target.checked);
+      updateSelectionCount();
+    });
+
+    resultsEl.addEventListener("click", event => {
+      if (event.target.closest("button, input, label")) return;
+      const card = event.target.closest(".image-card");
+      if (!card) return;
+      const groupEl = card.closest(".group");
+      if (!groupEl) return;
+
+      const checkbox = card.querySelector(".discard-check");
+      if (!checkbox) return;
+      checkbox.checked = !checkbox.checked;
+      checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    function getSelectedDiscardIds(scope = document) {
+      const ids = [];
+      scope.querySelectorAll('.discard-check:checked').forEach(input => ids.push(input.value));
+      return [...new Set(ids)];
+    }
+
+    function updateSelectionCount() {
+      const selected = getSelectedDiscardIds();
+      bulkActionsEl.hidden = !currentGroups.length;
+      selectionCountEl.textContent = `${selected.length} archivo(s) seleccionados para mover`;
+      moveAllBtn.disabled = selected.length === 0;
+    }
+
+    async function moveSelected(removeIds, sourceEl, message) {
+      if (!removeIds.length) {
+        setStatus("No hay archivos seleccionados para mover.", "warning");
+        return;
+      }
+      const ok = confirm(`${message}\n\nSe moveran ${removeIds.length} archivo(s) a _DUPLICADOS_ELIMINADOS. Continuar?`);
+      if (!ok) return;
+
+      try {
+        if (sourceEl) sourceEl.disabled = true;
+        const payload = await postJson("/api/move-selected", { remove_ids: removeIds });
+        if (payload.errors && payload.errors.length) {
+          setStatus(`Movidos ${payload.moved.length}. Algunos archivos tuvieron error.`, "warning");
+        } else {
+          setStatus(`Listo: ${payload.moved.length} archivo(s) movidos a respaldo.`);
+        }
+        removeIds.forEach(id => {
+          const card = resultsEl.querySelector(`.image-card[data-file-id="${CSS.escape(id)}"]`);
+          if (card) {
+            const group = card.closest(".group");
+            card.remove();
+            if (group && !group.querySelector(".image-card")) group.remove();
+          }
+        });
+        updateSelectionCount();
+      } catch (error) {
+        setStatus(error.message, "warning");
+      } finally {
+        if (sourceEl) sourceEl.disabled = false;
+      }
+    }
+
+    resultsEl.addEventListener("click", async event => {
+      const button = event.target.closest('button[data-action="move-selected-group"]');
+      if (!button) return;
+      const groupEl = button.closest(".group");
+      await moveSelected(getSelectedDiscardIds(groupEl), button, "Se moveran los elementos marcados en este grupo.");
+    });
+
+    moveAllBtn.addEventListener("click", async () => {
+      await moveSelected(getSelectedDiscardIds(), moveAllBtn, "Se moveran todos los descartados seleccionados.");
+    });
+  </script>
+</body>
+</html>

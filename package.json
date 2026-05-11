@@ -1,0 +1,12 @@
+{
+  "name": "duplicate-image-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "App local para detectar imagenes duplicadas, memes y miniaturas.",
+  "scripts": {
+    "start": "node scripts/start.js",
+    "dev": "node scripts/start.js",
+    "no-open": "node scripts/start.js --no-open",
+    "port": "node scripts/start.js --port"
+  }
+}
