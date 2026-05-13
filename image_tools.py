@@ -11,7 +11,7 @@ import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from constants import BACKUP_DIR_NAME, DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS
 from models import ImageInfo
@@ -228,6 +228,31 @@ def low_quality_reason(info: ImageInfo) -> str | None:
     return None
 
 
+TEXT_IMAGE_NAME_TOKENS = (
+    "meme",
+    "memes",
+    "funny",
+    "joke",
+    "chiste",
+    "humor",
+    "lol",
+    "dank",
+    "sticker",
+    "reaction",
+    "caption",
+    "quote",
+    "frase",
+    "texto",
+    "text",
+    "screenshot",
+    "screen",
+    "captura",
+    "capturas",
+    "pantalla",
+    "tweet",
+)
+
+
 def text_overlay_score(image: Any, y_start: int, y_end: int) -> float:
     width, height = image.size
     pixels = image.load()
@@ -260,9 +285,10 @@ def text_overlay_score(image: Any, y_start: int, y_end: int) -> float:
         dark_ratio = dark_pixels / row_total
         light_ratio = light_pixels / row_total
 
-        # Texto superpuesto suele alternar pixeles claros/oscuros en varias filas.
-        # Fotos normales tambien tienen bordes, pero rara vez sostienen este patron.
-        if 0.08 <= transition_ratio <= 0.34 and dark_ratio >= 0.04 and light_ratio >= 0.04:
+        # El texto suele producir cambios cortos de contraste en varias filas.
+        # Exigimos una mezcla minima de claros/oscuros para evitar marcar fotos normales.
+        contrast_mix = min(dark_ratio, light_ratio)
+        if 0.06 <= transition_ratio <= 0.36 and contrast_mix >= 0.035:
             text_like_rows += 1
 
     if not sampled_rows:
@@ -271,11 +297,67 @@ def text_overlay_score(image: Any, y_start: int, y_end: int) -> float:
     return text_like_rows / sampled_rows
 
 
+def text_image_scores(image: Any) -> tuple[float, float, int]:
+    width, height = image.size
+    if width < 140 or height < 140:
+        return 0.0, 0.0, 0
+
+    band_count = 7
+    band_padding = max(4, height // 80)
+    scores: list[float] = []
+    for index in range(band_count):
+        start = max(0, (height * index // band_count) + band_padding)
+        end = min(height, (height * (index + 1) // band_count) - band_padding)
+        if end <= start:
+            continue
+        scores.append(text_overlay_score(image, start, end))
+
+    if not scores:
+        return 0.0, 0.0, 0
+
+    strong_bands = sum(1 for score in scores if score >= 0.34)
+    return max(scores), sum(scores) / len(scores), strong_bands
+
+
+def fast_text_image_reason(path: Path) -> tuple[str | None, float]:
+    if Image is None or ImageOps is None:
+        return None, 0.0
+
+    try:
+        with Image.open(path) as image:
+            image = ImageOps.exif_transpose(image).convert("L")
+            image.thumbnail((512, 512))
+            max_score, avg_score, strong_bands = text_image_scores(image)
+    except Exception:
+        return None, 0.0
+
+    confidence = max(max_score, avg_score + strong_bands * 0.08)
+    if strong_bands >= 3 and avg_score >= 0.18:
+        return "posible captura/texto por varias zonas", confidence
+    if strong_bands >= 2 and max_score >= 0.48:
+        return "posible captura/texto por contraste", confidence
+    if max_score >= 0.62 and avg_score >= 0.14:
+        return "posible texto superpuesto", confidence
+    return None, confidence
+
+
 def ocr_text_reason(path: Path) -> str | None:
     try:
         import pytesseract  # type: ignore
     except Exception:
         return None
+
+    tesseract_cmd = os.environ.get("TESSERACT_CMD", "")
+    if not tesseract_cmd:
+        for candidate in (
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+            r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        ):
+            if Path(candidate).exists():
+                tesseract_cmd = candidate
+                break
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
 
     if Image is None or ImageOps is None:
         return None
@@ -290,59 +372,31 @@ def ocr_text_reason(path: Path) -> str | None:
 
     normalized = "".join(char for char in text if char.isalnum())
     if len(normalized) >= 10:
-        return "posible meme por texto OCR"
+        return "posible captura/texto por OCR"
+    return None
+
+
+def text_image_reason(info: ImageInfo) -> str | None:
+    if not is_image_file(info.path):
+        return None
+    name = info.path.name.lower()
+    has_name_hint = any(token in name for token in TEXT_IMAGE_NAME_TOKENS)
+    if has_name_hint:
+        return "posible captura/texto por nombre"
+
+    fast_reason, confidence = fast_text_image_reason(info.path)
+    if fast_reason:
+        return fast_reason
+
+    # OCR es mas pesado: solo se intenta cuando la prueba barata ve algo cercano a texto.
+    if confidence >= 0.24:
+        return ocr_text_reason(info.path)
+
     return None
 
 
 def meme_reason(info: ImageInfo) -> str | None:
-    if not is_image_file(info.path):
-        return None
-    name = info.path.name.lower()
-    meme_tokens = (
-        "meme",
-        "memes",
-        "funny",
-        "joke",
-        "chiste",
-        "humor",
-        "lol",
-        "dank",
-        "sticker",
-        "reaction",
-        "caption",
-        "quote",
-        "frase",
-        "texto",
-    )
-    if any(token in name for token in meme_tokens):
-        return "posible meme por nombre"
-
-    ocr_reason = ocr_text_reason(info.path)
-    if ocr_reason:
-        return ocr_reason
-
-    if Image is None or ImageOps is None or not info.width or not info.height:
-        return None
-
-    try:
-        with Image.open(info.path) as image:
-            image = ImageOps.exif_transpose(image).convert("L")
-            image.thumbnail((384, 384))
-            width, height = image.size
-            if width < 140 or height < 140:
-                return None
-            band_height = max(28, height // 5)
-            bands = (
-                (0, band_height),
-                (height - band_height, height),
-            )
-            scores = [text_overlay_score(image, start, end) for start, end in bands]
-            if max(scores) >= 0.42:
-                return "posible meme por franja de texto"
-    except Exception:
-        return None
-
-    return None
+    return text_image_reason(info)
 
 
 def build_image_info(files: list[Path], include_visual: bool, include_image_review: bool) -> list[ImageInfo]:
@@ -391,6 +445,7 @@ def find_duplicate_groups(
     include_images: bool = True,
     include_videos: bool = False,
     include_documents: bool = False,
+    progress_callback: Callable[[list[dict[str, Any]], dict[str, ImageInfo], dict[str, Any], str], None] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, ImageInfo], dict[str, Any]]:
     file_paths = get_supported_files(
         directory,
@@ -520,36 +575,59 @@ def find_duplicate_groups(
         group["group_id"] = index
 
     duplicate_ids = {file["id"] for group in groups for file in group["files"]}
+
+    def make_metadata(current_groups: list[dict[str, Any]], current_review_groups: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "scanned": len(file_paths),
+            "readable": len(infos),
+            "groups": sum(1 for group in current_groups if group.get("kind") == "duplicate"),
+            "review_groups": len(current_review_groups),
+            "to_remove": sum(len(group["files"]) - 1 for group in current_groups if group.get("kind") == "duplicate"),
+            "review_candidates": sum(len(group["files"]) for group in current_review_groups),
+            "visual_available": Image is not None,
+            "visual_pairs": visual_pairs,
+            "visual_comparisons": visual_comparisons,
+            "visual_limited": visual_limited,
+            "supported_images": sum(1 for info in infos if is_image_file(info.path)),
+            "supported_videos": sum(1 for info in infos if is_video_file(info.path)),
+            "supported_documents": sum(1 for info in infos if is_document_file(info.path)),
+            "include_images": include_images,
+            "include_videos": include_videos,
+            "include_documents": include_documents,
+            "backup_dir_name": BACKUP_DIR_NAME,
+        }
+
+    if progress_callback is not None:
+        review_message = (
+            "Duplicados listos. Revisando capturas/texto y miniaturas..."
+            if include_memes or include_low_quality
+            else "Duplicados listos."
+        )
+        progress_callback(groups, info_by_id, make_metadata(groups, []), review_message)
+
+    def publish_review_batch(current_review_groups: list[dict[str, Any]]) -> None:
+        if progress_callback is None:
+            return
+        current_groups = groups + current_review_groups
+        progress_callback(
+            current_groups,
+            info_by_id,
+            make_metadata(current_groups, current_review_groups),
+            f"Mostrando {len(current_review_groups)} candidatos de revision encontrados...",
+        )
+
     review_groups = find_review_groups(
         infos=infos,
         directory=directory,
         include_memes=include_memes,
         include_low_quality=include_low_quality,
         duplicate_ids=duplicate_ids,
+        start_group_id=len(groups) + 1,
+        progress_callback=publish_review_batch,
     )
-    for group in review_groups:
-        group["group_id"] = len(groups) + 1
-        groups.append(group)
+    groups.extend(review_groups)
 
-    metadata = {
-        "scanned": len(file_paths),
-        "readable": len(infos),
-        "groups": sum(1 for group in groups if group.get("kind") == "duplicate"),
-        "review_groups": len(review_groups),
-        "to_remove": sum(len(group["files"]) - 1 for group in groups if group.get("kind") == "duplicate"),
-        "review_candidates": sum(len(group["files"]) for group in review_groups),
-        "visual_available": Image is not None,
-        "visual_pairs": visual_pairs,
-        "visual_comparisons": visual_comparisons,
-        "visual_limited": visual_limited,
-        "supported_images": sum(1 for info in infos if is_image_file(info.path)),
-        "supported_videos": sum(1 for info in infos if is_video_file(info.path)),
-        "supported_documents": sum(1 for info in infos if is_document_file(info.path)),
-        "include_images": include_images,
-        "include_videos": include_videos,
-        "include_documents": include_documents,
-        "backup_dir_name": BACKUP_DIR_NAME,
-    }
+    metadata = make_metadata(groups, review_groups)
     return groups, info_by_id, metadata
 
 
@@ -559,8 +637,11 @@ def find_review_groups(
     include_memes: bool,
     include_low_quality: bool,
     duplicate_ids: set[str],
+    start_group_id: int = 1,
+    progress_callback: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> list[dict[str, Any]]:
     review_groups: list[dict[str, Any]] = []
+    next_group_id = start_group_id
     for info in sorted(infos, key=lambda item: item.mtime):
         if info.file_id in duplicate_ids:
             continue
@@ -580,13 +661,16 @@ def find_review_groups(
 
         review_groups.append(
             {
-                "group_id": 0,
+                "group_id": next_group_id,
                 "kind": "review",
                 "reason": ", ".join(reasons),
                 "keep_id": "",
                 "files": [serialize_info(info, directory)],
             }
         )
+        next_group_id += 1
+        if progress_callback is not None and len(review_groups) % 25 == 0:
+            progress_callback(review_groups.copy())
     return review_groups
 
 

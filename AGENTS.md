@@ -2,7 +2,7 @@
 
 ## Proyecto
 
-Esta carpeta contiene una app local para detectar imagenes, videos y documentos duplicados. En imagenes tambien detecta similares, memes y miniaturas de baja calidad.
+Esta carpeta contiene una app local para detectar imagenes, videos y documentos duplicados. En imagenes tambien detecta similares, capturas/imagenes con texto y miniaturas de baja calidad.
 
 Archivos principales:
 
@@ -10,7 +10,7 @@ Archivos principales:
 - `package.json`: scripts npm para ejecutar la app rapido.
 - `scripts/start.js`: busca Python y lanza `duplicate_image_app.py`.
 - `server.py`: servidor HTTP y endpoints API.
-- `image_tools.py`: escaneo, hashing, calidad, memes, miniaturas, videos y documentos.
+- `image_tools.py`: escaneo, hashing, calidad, capturas/texto, miniaturas, videos y documentos.
 - `file_actions.py`: movimiento seguro de descartes.
 - `models.py`: dataclasses y estado base.
 - `state.py`: estado global del escaneo activo.
@@ -35,15 +35,15 @@ Opcional:
 python duplicate_image_app.py --port 8765 --no-open
 ```
 
-Requiere Pillow para miniaturas, dimensiones, hash visual, baja calidad y deteccion visual de texto:
+Requiere dependencias Python para miniaturas, dimensiones, hash visual, PDFs, baja calidad y OCR opcional:
 
 ```powershell
-pip install pillow
+pip install pillow pymupdf pytesseract
 ```
 
-Opcional: `pip install pymupdf` para miniaturas de PDF y `ffmpeg` en PATH para miniaturas de video.
+Opcional del sistema: `ffmpeg` en PATH para miniaturas de video y Tesseract OCR para mejorar capturas/texto.
 
-Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo Python que ejecuta la app.
+Tambien existe `npm run setup`, que instala `pillow`, `pymupdf` y `pytesseract` usando el mismo Python que ejecuta la app.
 
 ## Reglas de comportamiento
 
@@ -56,8 +56,8 @@ Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo
 - En duplicados, la opcion `Mantener` define que imagen queda fuera de los descartes.
 - Cada grupo duplicado tiene `Seleccionar todas` para descartar todo el grupo, incluso la imagen marcada como mejor calidad.
 - Cada grupo duplicado tiene `Deseleccionar grupo` para no mover nada de ese grupo.
-- En revisiones de memes/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.
-- La deteccion de memes debe ser conservadora: nombres comunes, OCR opcional con `pytesseract`, y heuristica estricta de franjas de texto. Evitar marcar fotos normales solo por bordes/contraste.
+- En revisiones de texto/miniaturas, cada tarjeta mantiene una casilla `Mover` para revisar candidato por candidato.
+- La deteccion de capturas/imagenes con texto debe ser conservadora: nombres comunes, heuristica liviana por zonas, y OCR opcional con `pytesseract` solo en candidatos probables. Evitar marcar fotos normales solo por bordes/contraste.
 - La deteccion de miniaturas/baja calidad usa dimensiones pequenas y nombres tipo `thumb`, `thumbnail`, `miniatura`, `preview` o `cache`.
 
 ## Notas de desarrollo
@@ -72,5 +72,5 @@ Tambien existe `npm run setup`, que instala `pillow` y `pymupdf` usando el mismo
 
 ## Limitaciones conocidas
 
-- La deteccion de memes no usa OCR real; reconoce patrones visuales de texto y puede tener falsos positivos o negativos.
+- La deteccion de capturas/texto reconoce patrones visuales y usa OCR opcional si `pytesseract` y Tesseract estan disponibles; puede tener falsos positivos o negativos.
 - HEIC/HEIF/AVIF dependen de si la instalacion local de Pillow puede abrir esos formatos.

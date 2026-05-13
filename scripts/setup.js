@@ -8,7 +8,7 @@ if (!python) {
   process.exit(1);
 }
 
-const packages = ["pillow", "pymupdf"];
+const packages = ["pillow", "pymupdf", "pytesseract"];
 console.log(`Instalando dependencias: ${packages.join(", ")}`);
 
 const result = spawnSync(

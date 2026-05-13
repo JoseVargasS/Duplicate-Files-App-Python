@@ -350,7 +350,7 @@
         <label><input id="typeVideos" type="checkbox"> Videos</label>
         <label><input id="typeDocuments" type="checkbox"> Documentos</label>
         <label><input id="visual" type="checkbox"> Detectar fotos parecidas (lento)</label>
-        <label><input id="memes" type="checkbox"> Encontrar memes</label>
+        <label><input id="memes" type="checkbox"> Capturas o imagenes con texto</label>
         <label><input id="lowQuality" type="checkbox"> Encontrar miniaturas/baja calidad</label>
         <label>Parecido permitido <input id="threshold" type="number" min="0" max="20" value="6"></label>
         <label>Max. archivos <input id="limit" type="number" min="0" value="0"></label>
@@ -412,6 +412,55 @@
       return payload;
     }
 
+    async function scanWithProgress(data) {
+      const response = await fetch("/api/scan-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      if (!response.ok || !response.body) {
+        return postJson("/api/scan", data);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let latest = { groups: [], metadata: {} };
+
+      function consumeLine(line) {
+        if (!line.trim()) return;
+        const event = JSON.parse(line);
+        if (event.type === "error") {
+          throw new Error(event.error || "Ocurrio un error durante el analisis");
+        }
+        if (event.message) {
+          setStatus(event.message);
+        }
+        if (event.groups && event.metadata) {
+          latest = { groups: event.groups, metadata: event.metadata };
+          currentGroups = latest.groups || [];
+          renderSummary(latest.metadata || {});
+          renderGroups(currentGroups);
+          updateSelectionCount();
+        }
+      }
+
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          consumeLine(line);
+        }
+        if (done) break;
+      }
+      if (buffer.trim()) {
+        consumeLine(buffer);
+      }
+      return latest;
+    }
+
     chooseBtn.addEventListener("click", async () => {
       try {
         setBusy(true);
@@ -446,7 +495,7 @@
         resultsEl.innerHTML = "";
         summaryEl.hidden = true;
         setStatus("Analizando archivos. Si hay muchas fotos, videos o documentos, puede tardar...");
-        const payload = await postJson("/api/scan", {
+        const scanOptions = {
           directory,
           include_visual: visualEl.checked,
           include_memes: memesEl.checked,
@@ -456,7 +505,8 @@
           include_documents: typeDocumentsEl.checked,
           visual_threshold: Number(thresholdEl.value || 6),
           limit: Number(limitEl.value || 0)
-        });
+        };
+        const payload = await scanWithProgress(scanOptions);
         currentGroups = payload.groups || [];
         renderSummary(payload.metadata || {});
         renderGroups(currentGroups);
@@ -481,7 +531,7 @@
         <article class="metric"><b>${meta.scanned || 0}</b><span>${meta.supported_images || 0} img / ${meta.supported_videos || 0} video / ${meta.supported_documents || 0} doc</span></article>
         <article class="metric"><b>${meta.groups || 0}</b><span>grupos duplicados</span></article>
         <article class="metric"><b>${meta.to_remove || 0}</b><span>archivos sugeridos para mover</span></article>
-        <article class="metric"><b>${meta.review_candidates || 0}</b><span>memes/miniaturas para revisar</span></article>
+        <article class="metric"><b>${meta.review_candidates || 0}</b><span>texto/miniaturas para revisar</span></article>
       `;
     }
 
@@ -523,7 +573,7 @@
 
     function renderGroups(groups) {
       if (!groups.length) {
-        resultsEl.innerHTML = '<div class="empty">No se encontraron duplicados, memes o miniaturas con la configuracion actual.</div>';
+        resultsEl.innerHTML = '<div class="empty">No se encontraron duplicados, capturas con texto o miniaturas con la configuracion actual.</div>';
         bulkActionsEl.hidden = true;
         return;
       }

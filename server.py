@@ -78,6 +78,8 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
                 self.handle_choose_folder()
             elif parsed.path == "/api/scan":
                 self.handle_scan()
+            elif parsed.path == "/api/scan-stream":
+                self.handle_scan_stream()
             elif parsed.path == "/api/move":
                 self.handle_move()
             elif parsed.path == "/api/move-selected":
@@ -112,40 +114,69 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
         thread.join()
         json_response(self, {"directory": selected["path"]})
 
-    def handle_scan(self) -> None:
+    def read_scan_options(self) -> dict[str, Any]:
         payload = read_json(self)
         directory = Path(str(payload.get("directory", "")).strip()).expanduser()
         if not directory.exists() or not directory.is_dir():
             raise ValueError("Selecciona una carpeta valida")
 
-        limit = int(payload.get("limit") or 0)
-        include_visual = bool(payload.get("include_visual", False))
-        include_memes = bool(payload.get("include_memes", False))
-        include_low_quality = bool(payload.get("include_low_quality", False))
-        include_images = bool(payload.get("include_images", True))
-        include_videos = bool(payload.get("include_videos", False))
-        include_documents = bool(payload.get("include_documents", False))
         visual_threshold = int(payload.get("visual_threshold") or 6)
         visual_threshold = max(0, min(20, visual_threshold))
+        return {
+            "directory": directory,
+            "limit": int(payload.get("limit") or 0),
+            "include_visual": bool(payload.get("include_visual", False)),
+            "include_memes": bool(payload.get("include_memes", False)),
+            "include_low_quality": bool(payload.get("include_low_quality", False)),
+            "include_images": bool(payload.get("include_images", True)),
+            "include_videos": bool(payload.get("include_videos", False)),
+            "include_documents": bool(payload.get("include_documents", False)),
+            "visual_threshold": visual_threshold,
+        }
 
-        groups, files_by_id, metadata = find_duplicate_groups(
-            directory=directory,
-            limit=limit,
-            include_visual=include_visual,
-            visual_threshold=visual_threshold,
-            include_memes=include_memes,
-            include_low_quality=include_low_quality,
-            include_images=include_images,
-            include_videos=include_videos,
-            include_documents=include_documents,
-        )
+    def handle_scan(self) -> None:
+        options = self.read_scan_options()
+        groups, files_by_id, metadata = find_duplicate_groups(**options)
 
         with STATE.lock:
-            STATE.directory = directory.resolve()
+            STATE.directory = options["directory"].resolve()
             STATE.files_by_id = files_by_id
             STATE.groups = groups
 
         json_response(self, {"groups": groups, "metadata": metadata})
+
+    def handle_scan_stream(self) -> None:
+        options = self.read_scan_options()
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+        def emit(payload: dict[str, Any]) -> None:
+            data = json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n"
+            self.wfile.write(data)
+            self.wfile.flush()
+
+        def publish(groups: list[dict[str, Any]], files_by_id: dict[str, Any], metadata: dict[str, Any], message: str) -> None:
+            with STATE.lock:
+                STATE.directory = options["directory"].resolve()
+                STATE.files_by_id = files_by_id
+                STATE.groups = groups
+            emit({"type": "progress", "message": message, "groups": groups, "metadata": metadata})
+
+        try:
+            emit({"type": "status", "message": "Buscando archivos compatibles..."})
+            groups, files_by_id, metadata = find_duplicate_groups(**options, progress_callback=publish)
+            with STATE.lock:
+                STATE.directory = options["directory"].resolve()
+                STATE.files_by_id = files_by_id
+                STATE.groups = groups
+            emit({"type": "done", "message": "Analisis completo.", "groups": groups, "metadata": metadata})
+        except BrokenPipeError:
+            return
+        except Exception as exc:
+            emit({"type": "error", "error": str(exc)})
 
     def handle_move(self) -> None:
         payload = read_json(self)
@@ -182,7 +213,7 @@ class DuplicateImageHandler(BaseHTTPRequestHandler):
 
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime)
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "private, max-age=3600")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
